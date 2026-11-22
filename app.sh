@@ -5,6 +5,7 @@ INFRA="$(dirname "$(readlink -f "$0")")"
 APPS=/srv/apps
 SITE="$INFRA/proxy/site.sh"
 SITES="$INFRA/proxy/sites"
+DOCKER_CONFIG_FILE="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
 COMPOSE_FILES=(compose.prod.yaml compose.prod.yml docker-compose.prod.yml compose.yaml compose.yml docker-compose.yaml docker-compose.yml)
 
 die() {
@@ -235,7 +236,8 @@ It has to be a classic token: fine-grained tokens do not work with ghcr.io.
 
 EOF
   fi
-  if [ -f "$HOME/.docker/config.json" ] && jq -e --arg r "$registry" '.auths[$r]' "$HOME/.docker/config.json" > /dev/null 2>&1; then
+  repair_docker_config
+  if jq -e --arg r "$registry" '.auths[$r]' "$DOCKER_CONFIG_FILE" > /dev/null 2>&1; then
     echo "This server is already logged in to $registry, a new login replaces it."
   fi
   user="$(ask "GitHub username")"
@@ -243,11 +245,48 @@ EOF
   read -rsp "Token (not shown while typing): " token < /dev/tty
   echo >&2
   [ -n "$token" ] || die "Cancelled"
+
   if ! out="$(printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin 2>&1)"; then
-    echo "$out" >&2
-    die "$registry did not accept this username and token"
+    if grep -qi 'saving credentials\|credential' <<< "$out" && jq -e '.credsStore // .credHelpers' "$DOCKER_CONFIG_FILE" > /dev/null 2>&1; then
+      echo "Docker could not save the token through its credential helper, saving it in $DOCKER_CONFIG_FILE instead"
+      drop_credential_helper
+      out="$(printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin 2>&1)" || {
+        echo "$out" >&2
+        die "Login to $registry failed"
+      }
+    else
+      echo "$out" >&2
+      die "$registry did not accept this username and token"
+    fi
   fi
-  echo "Logged in to $registry as $user"
+
+  if ! jq -e --arg r "$registry" '.auths[$r]' "$DOCKER_CONFIG_FILE" > /dev/null 2>&1; then
+    die "Docker says the login worked, but nothing was saved in $DOCKER_CONFIG_FILE"
+  fi
+  echo "Logged in to $registry as $user, saved in $DOCKER_CONFIG_FILE"
+}
+
+repair_docker_config() {
+  local helper
+  [ -f "$DOCKER_CONFIG_FILE" ] || return 0
+  if ! jq -e . "$DOCKER_CONFIG_FILE" > /dev/null 2>&1; then
+    mv "$DOCKER_CONFIG_FILE" "$DOCKER_CONFIG_FILE.broken"
+    echo "$DOCKER_CONFIG_FILE was damaged, moved it to $DOCKER_CONFIG_FILE.broken"
+    return
+  fi
+  helper="$(jq -r '.credsStore // empty' "$DOCKER_CONFIG_FILE")"
+  if [ -n "$helper" ] && ! command -v "docker-credential-$helper" > /dev/null; then
+    echo "Docker is set to keep passwords in docker-credential-$helper, which is not installed here. Turning that off."
+    drop_credential_helper
+  fi
+}
+
+drop_credential_helper() {
+  local tmp
+  tmp="$(mktemp)"
+  jq 'del(.credsStore, .credHelpers)' "$DOCKER_CONFIG_FILE" > "$tmp"
+  mv "$tmp" "$DOCKER_CONFIG_FILE"
+  chmod 600 "$DOCKER_CONFIG_FILE"
 }
 
 update() {
