@@ -1,0 +1,7 @@
+{
+	log {
+		level ERROR
+	}
+}
+
+import /etc/caddy/sites/*.caddy
