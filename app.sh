@@ -105,7 +105,7 @@ EOF
   domain="$(ask "Domain, empty to leave without one" "$old")"
 
   echo "Starting $name"
-  docker compose up -d --remove-orphans
+  start
 
   for old in $(domains_of "$name"); do
     [ "$old" = "$domain" ] || "$SITE" remove "$old"
@@ -115,30 +115,96 @@ EOF
   fi
 }
 
+ssh_url() {
+  if [[ "$1" =~ ^https?://([^/]+)/(.+)$ ]]; then
+    local path="${BASH_REMATCH[2]%/}"
+    echo "git@${BASH_REMATCH[1]}:${path%.git}.git"
+  elif [[ "$1" == git@* || "$1" == ssh://* ]]; then
+    echo "$1"
+  fi
+}
+
+clone() {
+  local url="$1" name="$2" dir="$APPS/$2" ssh key command
+  echo "Cloning $url"
+  if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+    git clone -q "$url" "$dir" 2> /dev/null; then
+    return
+  fi
+
+  ssh="$(ssh_url "$url")"
+  [ -n "$ssh" ] || die "Could not clone $url. Check the link."
+  key="$HOME/.ssh/deploy-$name"
+  mkdir -p "$HOME/.ssh"
+  [ -f "$key" ] || ssh-keygen -q -t ed25519 -N "" -C "$(hostname) $name" -f "$key"
+  command="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+  echo
+  echo "No access. Either the link has a typo or the repository is private."
+  echo "If it is private, give this server read access:"
+  echo "repository on GitHub -> Settings -> Deploy keys -> Add deploy key, paste this line:"
+  echo
+  cat "$key.pub"
+  echo
+  ask "Press Enter when it is added" > /dev/null
+
+  GIT_SSH_COMMAND="$command" git clone -q "$ssh" "$dir" || die "Still no access. Check the link and the deploy key."
+  git -C "$dir" config core.sshCommand "$command"
+}
+
+is_url() {
+  [[ "$1" == *://* || "$1" == git@* ]]
+}
+
 deploy() {
-  local url="${1:-}" name
-  [ -n "$url" ] || die "Usage: app deploy <git-url> [name]"
-  name="${2:-$(basename "$url" .git | tr '[:upper:]_' '[:lower:]-')}"
-  name="$(ask "App name" "$name")"
+  local url="${1:-}" name="${2:-}"
+  if ! is_url "$url" && is_url "$name"; then
+    url="$2"
+    name="$1"
+  fi
+  is_url "$url" || die "Usage: app deploy <git-url> [name]"
+  if [ -z "$name" ]; then
+    name="$(ask "App name" "$(basename "${url%/}" .git | tr '[:upper:]_' '[:lower:]-')")"
+  fi
   [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "Name may only have lowercase letters, digits and dashes"
   [ ! -e "$APPS/$name" ] || die "$APPS/$name already exists. To set it up again: app setup $name"
-  git clone "$url" "$APPS/$name"
+  clone "$url" "$name"
   cd "$APPS/$name"
   configure "$name"
+}
+
+start() {
+  compose up -d --remove-orphans
+}
+
+compose() {
+  local log
+  log="$(mktemp)"
+  if ! docker compose "$@" 2>&1 | tee "$log"; then
+    if grep -qiE 'unauthorized|denied' "$log"; then
+      echo
+      echo "Docker could not download the images: they are private."
+      echo "Make the packages public on GitHub (profile -> Packages -> package -> Package settings -> Change visibility),"
+      echo "or log in once: docker login ghcr.io -u <github-login>, with a token that has read:packages."
+    fi
+    rm -f "$log"
+    exit 1
+  fi
+  rm -f "$log"
 }
 
 update() {
   local project built
   open_app "${1:-}"
-  [ ! -d .git ] || git pull --ff-only
-  docker compose pull --ignore-buildable --quiet
+  [ ! -d .git ] || GIT_TERMINAL_PROMPT=0 git pull --ff-only
+  compose pull --ignore-buildable --quiet
   project="$(docker compose config --format json | jq -r '.name')"
   mapfile -t built < <(docker compose config --format json | jq -r --arg p "$project" \
     '.services | to_entries[] | select(.value.build != null and (.value.image == null or .value.image == ($p + "-" + .key))) | .key')
   if [ ${#built[@]} -gt 0 ]; then
     docker compose build "${built[@]}"
   fi
-  docker compose up -d --remove-orphans
+  start
 }
 
 list() {
