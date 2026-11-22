@@ -125,18 +125,52 @@ ssh_url() {
   fi
 }
 
+repo_page() {
+  local host path
+  if [[ "$1" =~ ^https?://([^/]+)/(.+)$ ]]; then
+    host="${BASH_REMATCH[1]}"
+    path="${BASH_REMATCH[2]}"
+  elif [[ "$1" =~ ^git@([^:]+):(.+)$ ]]; then
+    host="${BASH_REMATCH[1]}"
+    path="${BASH_REMATCH[2]}"
+  elif [[ "$1" =~ ^ssh://(git@)?([^/:]+)(:[0-9]+)?/(.+)$ ]]; then
+    host="${BASH_REMATCH[2]}"
+    path="${BASH_REMATCH[4]}"
+  else
+    return 0
+  fi
+  path="${path%/}"
+  echo "https://$host/${path%.git}"
+}
+
 deploy_key() {
-  local key="$HOME/.ssh/deploy-$1"
+  local key="$HOME/.ssh/deploy-$1" page
   mkdir -p "$HOME/.ssh"
   [ -f "$key" ] || ssh-keygen -q -t ed25519 -N "" -C "$(hostname) $1" -f "$key"
+  page="$(repo_page "$2")"
   {
     echo
     echo "No access to $2"
     echo "Either the link has a typo or the repository is private."
-    echo "If it is private, give this server read access:"
-    echo "repository on GitHub -> Settings -> Deploy keys -> Add deploy key, paste this line:"
+    echo "If it is private, give this server read access with a deploy key."
+    echo
+    case "$page" in
+      https://github.com/*)
+        echo "1. Open $page/settings/keys/new"
+        ;;
+      https://gitlab.com/*)
+        echo "1. Open $page/-/settings/repository and expand Deploy keys"
+        ;;
+      *)
+        echo "1. Open the repository settings -> Deploy keys -> Add deploy key"
+        ;;
+    esac
+    echo "2. Title: $(hostname) $1"
+    echo "3. Key: paste this line"
     echo
     cat "$key.pub"
+    echo
+    echo "4. Leave \"Allow write access\" off, the server only needs to read. Click Add key."
     echo
   } >&2
   ask "Press Enter when it is added" > /dev/null
