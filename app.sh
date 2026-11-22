@@ -366,9 +366,14 @@ drop_credential_helper() {
   chmod 600 "$DOCKER_CONFIG_FILE"
 }
 
+running_images() {
+  docker compose ps -q | xargs -r docker inspect -f '{{.Name}} {{.Image}}' | sort
+}
+
 update() {
-  local project built
+  local project built before
   open_app "${1:-}"
+  before="$(running_images)"
   if [ -d .git ]; then
     ensure_access . "$1"
     GIT_TERMINAL_PROMPT=0 git pull --ff-only
@@ -381,6 +386,11 @@ update() {
     docker compose build "${built[@]}"
   fi
   start
+  if [ -n "$before" ] && [ "$(running_images)" = "$before" ]; then
+    echo
+    echo "Nothing new to run: the images are the same as before."
+    echo "If you just pushed, the image build may not be finished yet. Check Actions on GitHub and run app update again when it is green."
+  fi
 }
 
 list() {
