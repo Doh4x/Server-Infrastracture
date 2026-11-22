@@ -32,6 +32,8 @@ app deploy https://github.com/<вы>/blog.git
 | Развернуть из git | `app deploy <url> [имя]` |
 | Список приложений, сколько контейнеров работает, домены | `app list` |
 | Обновить: `git pull`, свежие образы, перезапуск | `app update <имя>` |
+| Обновить все приложения | `app update --all` |
+| Обновить саму инфраструктуру: `git pull` этого репозитория и `setup.sh` заново | `app self-update` |
 | Логи | `app logs <имя> [сервис]` |
 | Контейнеры приложения | `app status <имя>` |
 | Перезапустить, остановить, запустить | `app restart <имя>`, `app stop <имя>`, `app start <имя>` |
@@ -40,7 +42,6 @@ app deploy https://github.com/<вы>/blog.git
 | Сколько памяти и процессора ест | `docker stats` |
 | Логи прокси (сертификаты, ошибки 502) | `docker compose -f /srv/infra/proxy/compose.yaml logs -f` |
 | Сколько места занимает Docker | `docker system df` |
-| Обновить саму инфраструктуру | `git -C /srv/infra pull && sudo bash /srv/infra/setup.sh` |
 
 `app remove` спросит, удалять ли тома с данными. По умолчанию — нет.
 

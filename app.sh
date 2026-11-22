@@ -172,49 +172,80 @@ remove() {
   echo "Removed $name"
 }
 
-command="${1:-}"
-shift || true
-case "$command" in
-  deploy) deploy "$@" ;;
-  setup)
-    open_app "${1:-}"
-    configure "$1"
-    ;;
-  update) update "$@" ;;
-  list) list ;;
-  logs)
-    open_app "${1:-}"
-    shift
-    docker compose logs -f --tail 100 "$@"
-    ;;
-  status)
-    open_app "${1:-}"
-    docker compose ps
-    ;;
-  restart)
-    open_app "${1:-}"
-    docker compose restart
-    ;;
-  stop)
-    open_app "${1:-}"
-    docker compose stop
-    ;;
-  start)
-    open_app "${1:-}"
-    docker compose up -d
-    ;;
-  remove) remove "$@" ;;
-  *)
-    cat << 'EOF'
+update_all() {
+  local dir name failed=()
+  for dir in "$APPS"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    echo "== $name"
+    "$(readlink -f "$0")" update "$name" || failed+=("$name")
+  done
+  if [ ${#failed[@]} -gt 0 ]; then
+    die "Failed: ${failed[*]}"
+  fi
+}
+
+self_update() {
+  git -C "$INFRA" pull --ff-only
+  sudo bash "$INFRA/setup.sh"
+}
+
+main() {
+  local command="${1:-}"
+  shift || true
+  case "$command" in
+    deploy) deploy "$@" ;;
+    setup)
+      open_app "${1:-}"
+      configure "$1"
+      ;;
+    update)
+      if [ "${1:-}" = --all ]; then
+        update_all
+      else
+        update "$@"
+      fi
+      ;;
+    self-update) self_update ;;
+    list) list ;;
+    logs)
+      open_app "${1:-}"
+      shift
+      docker compose logs -f --tail 100 "$@"
+      ;;
+    status)
+      open_app "${1:-}"
+      docker compose ps
+      ;;
+    restart)
+      open_app "${1:-}"
+      docker compose restart
+      ;;
+    stop)
+      open_app "${1:-}"
+      docker compose stop
+      ;;
+    start)
+      open_app "${1:-}"
+      docker compose up -d
+      ;;
+    remove) remove "$@" ;;
+    *)
+      cat << 'EOF'
 app deploy <git-url> [name]   clone into /srv/apps and set it up
 app setup <name>              run the setup questions again
 app update <name>             git pull, fresh images, restart
+app update --all              the same for every app
+app self-update               git pull of server-infra and setup.sh again
 app list                      apps, how many containers are up, domains
 app logs <name> [service]     follow logs
 app status <name>             containers of the app
 app restart|stop|start <name>
 app remove <name>             stop, drop its domains, delete the folder
 EOF
-    [ -z "$command" ] || exit 1
-    ;;
-esac
+      [ -z "$command" ] || exit 1
+      ;;
+  esac
+}
+
+main "$@"; exit
