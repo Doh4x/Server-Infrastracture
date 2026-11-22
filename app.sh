@@ -534,7 +534,7 @@ main() {
       ;;
     restart)
       open_app "${1:-}"
-      docker compose restart
+      docker compose up -d --force-recreate
       ;;
     stop)
       open_app "${1:-}"
