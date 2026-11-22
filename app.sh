@@ -370,13 +370,50 @@ running_images() {
   docker compose ps -q | xargs -r docker inspect -f '{{.Name}} {{.Image}}' | sort
 }
 
+pull_app() {
+  local name="$1" mode="$2" answer
+  git config core.fileMode false
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "Files in $PWD were changed on this server:"
+    git status --short --untracked-files=no
+    if [ -z "$mode" ]; then
+      answer="$(ask "k = keep them on top of the new version, d = discard them, c = cancel" c)"
+      case "$answer" in
+        k) mode=keep ;;
+        d) mode=discard ;;
+        *) die "Cancelled. See the changes: cd $PWD && git diff" ;;
+      esac
+    fi
+  else
+    mode=""
+  fi
+
+  ensure_access . "$name"
+  case "$mode" in
+    discard) git checkout -- . ;;
+    keep) git stash push --quiet -m "app update $(date '+%F %T')" ;;
+  esac
+  GIT_TERMINAL_PROMPT=0 git pull --ff-only
+  if [ "$mode" = keep ] && ! git stash pop --quiet; then
+    git reset --hard --quiet
+    echo "Your changes conflict with the new version, so the new version is used as is."
+    echo "Your changes are saved, see them with: cd $PWD && git stash show -p"
+  fi
+}
+
 update() {
-  local project built before
-  open_app "${1:-}"
+  local name="" mode="" project built before arg
+  for arg in "$@"; do
+    case "$arg" in
+      --keep) mode=keep ;;
+      --discard) mode=discard ;;
+      *) name="$arg" ;;
+    esac
+  done
+  open_app "$name"
   before="$(running_images)"
   if [ -d .git ]; then
-    ensure_access . "$1"
-    GIT_TERMINAL_PROMPT=0 git pull --ff-only
+    pull_app "$name" "$mode"
   fi
   compose pull --ignore-buildable --quiet
   project="$(docker compose config --format json | jq -r '.name')"
@@ -430,7 +467,7 @@ update_all() {
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
     echo "== $name"
-    bash "$INFRA/app.sh" update "$name" || failed+=("$name")
+    bash "$INFRA/app.sh" update "$name" "$@" || failed+=("$name")
   done
   if [ ${#failed[@]} -gt 0 ]; then
     die "Failed: ${failed[*]}"
@@ -471,8 +508,12 @@ main() {
       configure "$1"
       ;;
     update)
-      if [ "${1:-}" = --all ]; then
-        update_all
+      if [[ " $* " == *" --all "* ]]; then
+        local flags=() arg
+        for arg in "$@"; do
+          [ "$arg" = --all ] || flags+=("$arg")
+        done
+        update_all "${flags[@]}"
       else
         update "$@"
       fi
@@ -510,6 +551,8 @@ app deploy <git-url> [name]   clone into /srv/apps and set it up
 app setup <name>              run the setup questions again
 app update <name>             git pull, fresh images, restart
 app update --all              the same for every app
+  --keep                      local changes in the app are kept on top of the new version
+  --discard                   local changes in the app are thrown away
 app self-update               git pull of server-infra and setup.sh again
 app login [registry]          log in to ghcr.io to pull private images, with instructions
 app logins                    registries this server is logged in to, and as whom
