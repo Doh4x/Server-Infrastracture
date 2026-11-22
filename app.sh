@@ -290,6 +290,25 @@ logins() {
     done
 }
 
+logout() {
+  local registry="${1:-}" registries=()
+  if [ -f "$DOCKER_CONFIG_FILE" ]; then
+    mapfile -t registries < <(jq -r '(.auths // {}) | keys[]' "$DOCKER_CONFIG_FILE" 2> /dev/null)
+  fi
+  [ ${#registries[@]} -gt 0 ] || die "$(whoami) is not logged in to any registry"
+  if [ -z "$registry" ]; then
+    if [ ${#registries[@]} -eq 1 ]; then
+      registry="${registries[0]}"
+    else
+      registry="$(ask "Log out of which registry (${registries[*]})" ghcr.io)"
+    fi
+  fi
+  printf '%s\n' "${registries[@]}" | grep -qxF "$registry" || die "Not logged in to $registry. See: app logins"
+  docker logout "$registry" > /dev/null
+  echo "Logged out of $registry"
+  echo "Running apps keep working. New private images from $registry will not download until: app login"
+}
+
 repair_docker_config() {
   local helper
   [ -f "$DOCKER_CONFIG_FILE" ] || return 0
@@ -417,6 +436,7 @@ main() {
     self-update) self_update ;;
     login) login "$@" ;;
     logins) logins ;;
+    logout) logout "$@" ;;
     list) list ;;
     logs)
       open_app "${1:-}"
@@ -449,6 +469,7 @@ app update --all              the same for every app
 app self-update               git pull of server-infra and setup.sh again
 app login [registry]          log in to ghcr.io to pull private images, with instructions
 app logins                    registries this server is logged in to, and as whom
+app logout [registry]         forget the login, for example to switch to another GitHub account
 app list                      apps, how many containers are up, domains
 app logs <name> [service]     follow logs
 app status <name>             containers of the app
