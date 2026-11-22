@@ -124,30 +124,50 @@ ssh_url() {
   fi
 }
 
+deploy_key() {
+  local key="$HOME/.ssh/deploy-$1"
+  mkdir -p "$HOME/.ssh"
+  [ -f "$key" ] || ssh-keygen -q -t ed25519 -N "" -C "$(hostname) $1" -f "$key"
+  {
+    echo
+    echo "No access to $2"
+    echo "Either the link has a typo or the repository is private."
+    echo "If it is private, give this server read access:"
+    echo "repository on GitHub -> Settings -> Deploy keys -> Add deploy key, paste this line:"
+    echo
+    cat "$key.pub"
+    echo
+  } >&2
+  ask "Press Enter when it is added" > /dev/null
+  echo "ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+}
+
+can_reach() {
+  GIT_TERMINAL_PROMPT=0 git -C "$1" ls-remote -q origin HEAD > /dev/null 2>&1
+}
+
+ensure_access() {
+  local dir="$1" name="$2" url ssh command
+  can_reach "$dir" && return
+  url="$(git -C "$dir" remote get-url origin)"
+  ssh="$(ssh_url "$url")"
+  [ -n "$ssh" ] || die "No access to $url"
+  command="$(deploy_key "$name" "$url")"
+  git -C "$dir" remote set-url origin "$ssh"
+  git -C "$dir" config core.sshCommand "$command"
+  can_reach "$dir" || die "Still no access. Check the link and the deploy key."
+}
+
 clone() {
-  local url="$1" name="$2" dir="$APPS/$2" ssh key command
+  local url="$1" name="$2" dir="$APPS/$2" ssh command
   echo "Cloning $url"
   if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
     git clone -q "$url" "$dir" 2> /dev/null; then
     return
   fi
-
   ssh="$(ssh_url "$url")"
   [ -n "$ssh" ] || die "Could not clone $url. Check the link."
-  key="$HOME/.ssh/deploy-$name"
-  mkdir -p "$HOME/.ssh"
-  [ -f "$key" ] || ssh-keygen -q -t ed25519 -N "" -C "$(hostname) $name" -f "$key"
-  command="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-
-  echo
-  echo "No access. Either the link has a typo or the repository is private."
-  echo "If it is private, give this server read access:"
-  echo "repository on GitHub -> Settings -> Deploy keys -> Add deploy key, paste this line:"
-  echo
-  cat "$key.pub"
-  echo
-  ask "Press Enter when it is added" > /dev/null
-
+  command="$(deploy_key "$name" "$url")"
   GIT_SSH_COMMAND="$command" git clone -q "$ssh" "$dir" || die "Still no access. Check the link and the deploy key."
   git -C "$dir" config core.sshCommand "$command"
 }
@@ -196,7 +216,10 @@ compose() {
 update() {
   local project built
   open_app "${1:-}"
-  [ ! -d .git ] || GIT_TERMINAL_PROMPT=0 git pull --ff-only
+  if [ -d .git ]; then
+    ensure_access . "$1"
+    GIT_TERMINAL_PROMPT=0 git pull --ff-only
+  fi
   compose pull --ignore-buildable --quiet
   project="$(docker compose config --format json | jq -r '.name')"
   mapfile -t built < <(docker compose config --format json | jq -r --arg p "$project" \
@@ -252,7 +275,15 @@ update_all() {
 }
 
 self_update() {
-  git -C "$INFRA" pull --ff-only
+  local before
+  ensure_access "$INFRA" infra
+  before="$(git -C "$INFRA" rev-parse HEAD)"
+  GIT_TERMINAL_PROMPT=0 git -C "$INFRA" pull --ff-only
+  if [ "$(git -C "$INFRA" rev-parse HEAD)" = "$before" ]; then
+    echo "server-infra is already up to date"
+    return
+  fi
+  git -C "$INFRA" log --oneline "$before..HEAD"
   sudo bash "$INFRA/setup.sh"
 }
 
