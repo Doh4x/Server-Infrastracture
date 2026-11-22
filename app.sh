@@ -198,19 +198,56 @@ start() {
 }
 
 compose() {
-  local log
+  local log denied=""
   log="$(mktemp)"
-  if ! docker compose "$@" 2>&1 | tee "$log"; then
-    if grep -qiE 'unauthorized|denied' "$log"; then
-      echo
-      echo "Docker could not download the images: they are private."
-      echo "Make the packages public on GitHub (profile -> Packages -> package -> Package settings -> Change visibility),"
-      echo "or log in once: docker login ghcr.io -u <github-login>, with a token that has read:packages."
-    fi
+  if docker compose "$@" 2>&1 | tee "$log"; then
     rm -f "$log"
-    exit 1
+    return
   fi
+  grep -qiE 'unauthorized|denied' "$log" && denied=1
   rm -f "$log"
+  if [ -n "$denied" ] && [ -z "${COMPOSE_RETRY:-}" ]; then
+    echo
+    echo "Docker could not download the images: they are private, and this server is not logged in to the registry."
+    if [ "$(ask "Log in to ghcr.io now? Y/n" y)" != n ]; then
+      login ghcr.io
+      COMPOSE_RETRY=1 compose "$@"
+      return
+    fi
+    echo "Later: app login. Or make the packages public on GitHub."
+  fi
+  exit 1
+}
+
+login() {
+  local registry="${1:-ghcr.io}" user token out
+  if [ "$registry" = ghcr.io ]; then
+    cat << EOF
+
+To pull private images from ghcr.io the server needs a GitHub token that can only read packages.
+
+1. Open https://github.com/settings/tokens/new?scopes=read:packages&description=$(hostname)
+   or by hand: GitHub -> Settings -> Developer settings -> Personal access tokens -> Tokens (classic) -> Generate new token (classic).
+2. Only read:packages should be checked. Expiration: "No expiration", otherwise pulls stop working the day it expires.
+3. Click Generate token and copy it, GitHub shows it only once.
+
+It has to be a classic token: fine-grained tokens do not work with ghcr.io.
+
+EOF
+  fi
+  if [ -f "$HOME/.docker/config.json" ] && jq -e --arg r "$registry" '.auths[$r]' "$HOME/.docker/config.json" > /dev/null 2>&1; then
+    echo "This server is already logged in to $registry, a new login replaces it."
+  fi
+  user="$(ask "GitHub username")"
+  [ -n "$user" ] || die "Cancelled"
+  read -rsp "Token (not shown while typing): " token < /dev/tty
+  echo >&2
+  [ -n "$token" ] || die "Cancelled"
+  if ! out="$(printf '%s' "$token" | docker login "$registry" -u "$user" --password-stdin 2>&1)"; then
+    echo "$out" >&2
+    die "$registry did not accept this username and token"
+  fi
+  echo "Logged in to $registry as $user"
 }
 
 update() {
@@ -315,6 +352,7 @@ main() {
       fi
       ;;
     self-update) self_update ;;
+    login) login "$@" ;;
     list) list ;;
     logs)
       open_app "${1:-}"
@@ -345,6 +383,7 @@ app setup <name>              run the setup questions again
 app update <name>             git pull, fresh images, restart
 app update --all              the same for every app
 app self-update               git pull of server-infra and setup.sh again
+app login [registry]          log in to ghcr.io to pull private images, with instructions
 app list                      apps, how many containers are up, domains
 app logs <name> [service]     follow logs
 app status <name>             containers of the app
