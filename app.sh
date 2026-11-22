@@ -108,10 +108,10 @@ EOF
   start
 
   for old in $(domains_of "$name"); do
-    [ "$old" = "$domain" ] || "$SITE" remove "$old"
+    [ "$old" = "$domain" ] || bash "$SITE" remove "$old"
   done
   if [ -n "$domain" ]; then
-    "$SITE" add "$domain" "$name:$port"
+    bash "$SITE" add "$domain" "$name:$port"
   fi
 }
 
@@ -254,7 +254,7 @@ remove() {
     docker compose down
   fi
   for domain in $(domains_of "$name"); do
-    "$SITE" remove "$domain"
+    bash "$SITE" remove "$domain"
   done
   cd "$APPS"
   rm -rf "${APPS:?}/$name" 2> /dev/null || sudo rm -rf "${APPS:?}/$name"
@@ -267,7 +267,7 @@ update_all() {
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
     echo "== $name"
-    "$(readlink -f "$0")" update "$name" || failed+=("$name")
+    bash "$INFRA/app.sh" update "$name" || failed+=("$name")
   done
   if [ ${#failed[@]} -gt 0 ]; then
     die "Failed: ${failed[*]}"
@@ -275,7 +275,15 @@ update_all() {
 }
 
 self_update() {
-  local before
+  local before answer
+  git -C "$INFRA" config core.fileMode false
+  if [ -n "$(git -C "$INFRA" status --porcelain --untracked-files=no)" ]; then
+    echo "Files in $INFRA were changed on this server:"
+    git -C "$INFRA" status --short --untracked-files=no
+    answer="$(ask "Discard these changes and take the version from GitHub? y/N" n)"
+    [ "$answer" = y ] || die "Cancelled. See the changes: git -C $INFRA diff"
+    git -C "$INFRA" checkout -- .
+  fi
   ensure_access "$INFRA" infra
   before="$(git -C "$INFRA" rev-parse HEAD)"
   GIT_TERMINAL_PROMPT=0 git -C "$INFRA" pull --ff-only

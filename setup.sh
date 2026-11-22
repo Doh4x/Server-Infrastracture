@@ -100,9 +100,13 @@ chown -R "$OWNER": "$INFRA"
 docker network inspect proxy > /dev/null 2>&1 || docker network create proxy
 
 step "Proxy (ports 80 and 443)"
-chmod +x "$INFRA/proxy/site.sh" "$INFRA/app.sh"
-ln -sf "$INFRA/proxy/site.sh" /usr/local/bin/site
-ln -sf "$INFRA/app.sh" /usr/local/bin/app
+runuser -u "$OWNER" -- git -C "$INFRA" config core.fileMode false
+for command in app site; do
+  rm -f "/usr/local/bin/$command"
+done
+printf '#!/bin/sh\nexec bash %s "$@"\n' "$INFRA/app.sh" > /usr/local/bin/app
+printf '#!/bin/sh\nexec bash %s "$@"\n' "$INFRA/proxy/site.sh" > /usr/local/bin/site
+chmod +x /usr/local/bin/app /usr/local/bin/site
 (cd "$INFRA/proxy" && docker compose up -d)
 
 step "Done"
