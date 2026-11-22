@@ -18,7 +18,7 @@ step "System packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get upgrade -yq
-apt-get install -yq ca-certificates curl git ufw unattended-upgrades
+apt-get install -yq ca-certificates curl git jq ufw unattended-upgrades
 
 step "Automatic security updates"
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
@@ -100,12 +100,13 @@ chown -R "$OWNER": "$INFRA"
 docker network inspect proxy > /dev/null 2>&1 || docker network create proxy
 
 step "Proxy (ports 80 and 443)"
-chmod +x "$INFRA/proxy/site.sh"
+chmod +x "$INFRA/proxy/site.sh" "$INFRA/app.sh"
 ln -sf "$INFRA/proxy/site.sh" /usr/local/bin/site
+ln -sf "$INFRA/app.sh" /usr/local/bin/app
 (cd "$INFRA/proxy" && docker compose up -d)
 
 step "Done"
-echo "Apps go to /srv/apps/<name>"
-echo "Domains:   site add <domain> <container:port> | site remove <domain> | site list"
+echo "Deploy an app: app deploy <git-url>"
+echo "All commands: app"
 [ "$OWNER" != root ] && echo "Log out and back in so '$OWNER' can run docker without sudo"
 exit 0
