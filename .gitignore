@@ -1,1 +1,3 @@
 proxy/sites/*.caddy
+proxy/certs/*.pem
+proxy/certs/*.key

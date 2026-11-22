@@ -276,6 +276,9 @@ update_all() {
 
 self_update() {
   local before answer
+  if ! git -C "$INFRA" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    die "$INFRA is not a git clone, so there is nothing to pull. Clone the repository there again, see README."
+  fi
   git -C "$INFRA" config core.fileMode false
   if [ -n "$(git -C "$INFRA" status --porcelain --untracked-files=no)" ]; then
     echo "Files in $INFRA were changed on this server:"

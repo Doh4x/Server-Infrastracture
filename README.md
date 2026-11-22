@@ -42,7 +42,9 @@ app deploy https://github.com/<вы>/blog.git
 | Удалить приложение вместе с доменами | `app remove <имя>` |
 | Какие домены куда ведут | `site list` |
 | Сколько памяти и процессора ест | `docker stats` |
-| Логи прокси (сертификаты, ошибки 502) | `docker compose -f /srv/infra/proxy/compose.yaml logs -f` |
+| Логи прокси (сертификаты, ошибки 502) | `site logs` |
+| Перезапустить прокси | `site restart` |
+| Установленные сертификаты Cloudflare | `site cert` |
 | Сколько места занимает Docker | `docker system df` |
 
 `app remove` спросит, удалять ли тома с данными. По умолчанию — нет.
@@ -50,6 +52,18 @@ app deploy https://github.com/<вы>/blog.git
 `app self-update` подтягивает новую версию этого репозитория с GitHub, показывает, что поменялось, и заново запускает `setup.sh`. Если репозиторий приватный, при первом запуске команда так же, как `app deploy`, покажет ключ для Deploy keys.
 
 Ошибка 502 от прокси почти всегда значит, что приложение не запущено или при настройке указан не тот порт. Проверить: `app status <имя>`, поменять порт: `app setup <имя>`.
+
+## Cloudflare с оранжевым облаком
+
+Если домен проксируется через Cloudflare (оранжевое облако), обычный сертификат Let's Encrypt получить не выйдет: проверка домена приходит в Cloudflare, а не на сервер. Вместо него ставится Origin-сертификат от Cloudflare — один на весь домен, на 15 лет.
+
+1. В Cloudflare: SSL/TLS → Origin Server → Create Certificate. Оставьте «Generate private key and CSR with Cloudflare», в списке доменов — `*.example.com` и `example.com`, срок — 15 лет.
+2. На сервере выполните `site cert example.com`, вставьте Origin Certificate, потом Private Key. Команда проверит, что ключ подходит к сертификату.
+3. В Cloudflare: SSL/TLS → Overview → режим Full (strict).
+
+С этого момента все сайты на поддоменах `example.com`, и уже добавленные, и новые из `app deploy`, работают с этим сертификатом. Сертификат покрывает один уровень: `blog.example.com` — да, `a.blog.example.com` — нет.
+
+Настоящий IP посетителя приложение всё равно получает: прокси доверяет адресам Cloudflare и берёт IP из заголовка `CF-Connecting-IP`, а приложению передаёт его в `X-Forwarded-For`. Подделать его снаружи нельзя.
 
 ## Что должно быть в репозитории приложения
 

@@ -107,7 +107,8 @@ done
 printf '#!/bin/sh\nexec bash %s "$@"\n' "$INFRA/app.sh" > /usr/local/bin/app
 printf '#!/bin/sh\nexec bash %s "$@"\n' "$INFRA/proxy/site.sh" > /usr/local/bin/site
 chmod +x /usr/local/bin/app /usr/local/bin/site
-(cd "$INFRA/proxy" && docker compose up -d)
+(cd "$INFRA/proxy" && docker compose up -d && docker compose restart caddy)
+runuser -u "$OWNER" -- bash "$INFRA/proxy/site.sh" refresh
 
 step "Done"
 echo "Deploy an app: app deploy <git-url>"
