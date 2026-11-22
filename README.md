@@ -37,6 +37,7 @@ app deploy https://github.com/<вы>/blog.git
 | Обновить все приложения | `app update --all` |
 | Обновить саму инфраструктуру: `git pull` этого репозитория и `setup.sh` заново | `app self-update` |
 | Войти в ghcr.io для закрытых образов | `app login` |
+| В какие реестры вошёл сервер и под каким логином | `app logins` |
 | Логи | `app logs <имя> [сервис]` |
 | Контейнеры приложения | `app status <имя>` |
 | Перезапустить, остановить, запустить | `app restart <имя>`, `app stop <имя>`, `app start <имя>` |

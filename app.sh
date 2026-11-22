@@ -266,6 +266,30 @@ EOF
   echo "Logged in to $registry as $user, saved in $DOCKER_CONFIG_FILE"
 }
 
+logins() {
+  local helper registry auth user
+  echo "Registry logins of $(whoami) ($DOCKER_CONFIG_FILE):"
+  if [ ! -f "$DOCKER_CONFIG_FILE" ] || ! jq -e '(.auths // {}) | length > 0' "$DOCKER_CONFIG_FILE" > /dev/null 2>&1; then
+    jq -e . "$DOCKER_CONFIG_FILE" > /dev/null 2>&1 || [ ! -f "$DOCKER_CONFIG_FILE" ] || die "The file is damaged. app login repairs it."
+    echo "none. Log in: app login"
+    return
+  fi
+
+  helper="$(jq -r '.credsStore // empty' "$DOCKER_CONFIG_FILE")"
+  printf '%-30s %s\n' REGISTRY USER
+  jq -r '.auths | to_entries[] | [.key, (.value.auth // "")] | @tsv' "$DOCKER_CONFIG_FILE" |
+    while IFS=$'\t' read -r registry auth; do
+      if [ -n "$auth" ]; then
+        user="$(printf '%s' "$auth" | base64 -d 2> /dev/null | cut -d: -f1)"
+      elif [ -n "$helper" ] && command -v "docker-credential-$helper" > /dev/null; then
+        user="$(docker-credential-"$helper" list 2> /dev/null | jq -r --arg r "$registry" '.[$r] // .["https://" + $r] // "?"')"
+      else
+        user="? (token is missing, log in again: app login)"
+      fi
+      printf '%-30s %s\n' "$registry" "${user:-?}"
+    done
+}
+
 repair_docker_config() {
   local helper
   [ -f "$DOCKER_CONFIG_FILE" ] || return 0
@@ -392,6 +416,7 @@ main() {
       ;;
     self-update) self_update ;;
     login) login "$@" ;;
+    logins) logins ;;
     list) list ;;
     logs)
       open_app "${1:-}"
@@ -423,6 +448,7 @@ app update <name>             git pull, fresh images, restart
 app update --all              the same for every app
 app self-update               git pull of server-infra and setup.sh again
 app login [registry]          log in to ghcr.io to pull private images, with instructions
+app logins                    registries this server is logged in to, and as whom
 app list                      apps, how many containers are up, domains
 app logs <name> [service]     follow logs
 app status <name>             containers of the app
