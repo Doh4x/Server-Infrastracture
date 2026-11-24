@@ -1,7 +1,7 @@
 ## Установка
 
 ```bash
-sudo git clone https://github.com/<вы>/server-infra.git /srv/infra
+sudo git clone https://github.com/doh4x/server-infra.git /srv/infra
 sudo bash /srv/infra/setup.sh
 ```
 
